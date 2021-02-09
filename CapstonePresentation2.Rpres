@@ -1,0 +1,47 @@
+Capstone Application Pitch
+========================================================
+author: Derek Whipple
+date: 2/9/2021
+autosize: true
+
+Problem Background
+========================================================
+
+- Capstone course for Data Science Specialization
+- Learn ideas and concepts relating to Natural Language Processing (NLP)
+- To perform a task as a data scientist and demonstrate the concepts that have been learned throughout the series of courses
+- Application to predict the next word given a series of one or more words
+
+Application Overview
+========================================================
+
+- Shiny application that is published at shinyaps.io website
+- User interface contains input text box, "Predict" button, and output text box
+- User types a series of words into the input text box, clicks the "Predict" button, and then the predicted next single word is displayed
+- Contains a proprietary text prediction algorithm that is described in further detail in the next slide
+- Minimum of one word of input text required for prediction
+
+Prediction Algorithm
+========================================================
+
+- Model setup (create n-gram models)
+  - Combine and subset all input data (0.5%)
+  - Remove punctuation, numbers, non-ascii characters, profanity words
+  - Create unigram, bigram, and trigram dataframes.
+- Text Prediction
+  - Clean user input text (just like above)
+  - If > 2 input words, get matching trigram final word, then final bigram word, then top unigram.
+  - If 1 input word, get matching bigram final word, then top unigram.
+
+Notes
+========================================================
+
+- Possible improvements to be made:
+  - Increase source samples. 0.5% of the given sample sufficient, but results could improve with greater sample.
+  - Use N-grams larger than trigrams. Would lead to more accurate matching and prediction.
+- Tradeoffs:
+  - Used 0.5% sample size to be able to generate n-grams
+    - to be able to run in a reasonable time
+    - to not run out of memory and crash app
+  - Used unigram, bigram, and trigram models. No larger n-gram models - for same reason as 0.5% sample size
+- Did not use stopwords. Poor results with stopwords.

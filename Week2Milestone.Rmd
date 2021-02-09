@@ -1,0 +1,279 @@
+---
+title: "Week 2 Milestone"
+author: "Derek Whipple"
+date: "2/1/2021"
+output: html_document
+---
+
+```{r setup, include=FALSE, echo=FALSE, message=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(tokenizers)
+library(tm)
+library(RWeka)
+library(dplyr)
+library(ngram)
+library(R.utils)
+library(ggplot2)
+```
+
+## Overview
+
+The purpose of this milestone is just to explore the data for the Capstone course. This report will show some high-level statistics and data associated with the project.
+
+According to Wikipedia (https://en.wikipedia.org/wiki/N-gram) and in conjunction with this project, a unigram is a single word, a bigram is a set of two words, and a trigram is a set of three words. The unigrams found in the source files are essentially every individual word found (minus profanities and common/stop words). The bigrams found are the sequence of two consecutive words (minus profanities and stop words). The trigrams are the sequence of three consecutive words (minus profanities and stop words).
+
+```{r miscSetup, echo=FALSE}
+    profanityUrl <- "https://www.frontgatemedia.com/new/wp-content/uploads/2014/03/Terms-to-Block.csv"
+    profanityFile <- "./profanities.txt"
+    download.file(url = profanityUrl, destfile = profanityFile)
+```
+
+```{r functions, echo=FALSE}
+# get the connection to a file and create a subset of file contents
+getFileSubset <- function(filePath, filePercent) {
+    fileConnection <- file(filePath, "rb")
+    fileLines <- readLines(fileConnection, encoding = "UTF-8", skipNul = TRUE)
+    close(fileConnection)
+    partialFile <- sample(fileLines, size = length(fileLines) * filePercent, replace = FALSE)
+    return(fileLines)
+}
+
+# get the connection to a file and create a subset of file contents
+getFile <- function(filePath) {
+    fileConnection <- file(filePath, "rb")
+    fileLines <- readLines(fileConnection, encoding = "UTF-8", skipNul = TRUE)
+    close(fileConnection)
+    return(fileLines)
+}
+
+tokenizeUnigram <- function(corpora) {
+    NGramTokenizer(corpora, Weka_control(min = 1, max = 1))
+}
+
+tokenizeTrigram <- function(corpora) {
+    NGramTokenizer(corpora, Weka_control(min = 3, max = 3))
+}
+
+createTokenizedSet <- function(corpus, tokenizeFunction) {
+    # need to create a Term-Document matrix to capture the frequencies and other information about the tokens (terms)
+    documentMatrix <- TermDocumentMatrix(corpus, control = list(tokenize = tokenizeFunction))
+    
+    # now that we have a Term-Document matrix, we can do a bunch of different things to it
+    
+    # remove tokens with single special characters
+    # remove number tokens
+    
+    # let's get the grams with the highest count
+    mostFrequentGramTerms <- findFreqTerms(documentMatrix, lowfreq = 10)
+    mostFrequentGramTerms <- rowSums(as.matrix(documentMatrix[mostFrequentGramTerms, ]))
+    mostFrequentGramDataFrame <- data.frame(Gram = names(mostFrequentGramTerms), Count=mostFrequentGramTerms)
+    mostFrequentGramDataFrame <- arrange(mostFrequentGramDataFrame, desc(Count))
+    mostFrequentGramDataFrameSubset <- mostFrequentGramDataFrame[1:10,]   
+}
+
+setUpProfanityFilter <- function() {
+    profanityTable <- read.table(profanityFile,
+                                 header = FALSE, sep = "\t", quote = "\"", stringsAsFactors = FALSE,
+                                 col.names = c('Profanity'))
+    
+    # remove the first 4 lines, they aren't any of the profanity list
+    profanitySet <- profanityTable[-c(1:4),]
+    # get rid of all commas
+    profanitySet <- gsub(",", "", profanitySet, fixed = TRUE)
+}
+
+setUpStopWordFilter <- function() {
+    # manually copied stop word list from this URL: "http://www.lextek.com/manuals/onix/stopwords1.html"
+    stopWordFile <- "./stopWords.txt"
+
+    stopWordTable <- read.table(stopWordFile,
+                                 header = FALSE, sep = "\t", quote = "\"", stringsAsFactors = FALSE,
+                                 col.names = c('StopWords'))
+    
+    # remove the first 4 lines, they aren't any of the profanity list
+    #stopWordSet <- stopWordTable[1,]
+    stopWordSet <- stopWordTable$StopWords
+    stopWordSet <- gsub("[[:punct:]]","",stopWordSet)
+}
+
+
+
+tokenizeText <- function(inputText) {
+    # iterate through each text source
+    for(i in 1:length(inputText)) {
+        tempTextSource <- inputText[i]
+        # replace "." and "-" with space
+        tempTextSource <- gsub("[.-]"," ", tempTextSource)
+        # remove punctuation
+        tempTextSource <- gsub("[[:punct:]]","",tempTextSource)
+        # remove numbers
+        tempTextSource <- gsub("[0-9]","",tempTextSource)
+        # make lower case
+        inputText[i] <- tolower(tempTextSource)
+    }
+    
+    # get words
+    inputText <- lapply(inputText, function(x) unlist(strsplit(x,split=" ")) )
+    inputText <- lapply(inputText, function(x) grep("^[a-z]+$",x,value=TRUE) )
+    
+    # Remove profane and stop words from input text
+    profanityWords <- setUpProfanityFilter() 
+    stopWords <- setUpStopWordFilter()
+    remWords <- c(profanityWords[-1],stopWords)
+    inputText <- lapply(inputText, function(x) { x[!(x %in% remWords)] })
+}
+
+# creates n grams given text and a specified number of grams
+generateNgrams <- function(inputText, numGram, useMatrix = FALSE, dictionary = character()) {
+    # Tokenize the text
+    tokenizedText <- tokenizeText(inputText)
+    
+    # if we're looking at at least a bigram, only select words in the dictionary
+    if(numGram > 1) {
+        tokenizedText <- sapply(tokenizedText,function(x) x[x %in% dictionary])
+    }
+    
+    if(numGram == 2) { # Bigrams
+        bigramIndex <- sapply(tokenizedText, function(x) ifelse(length(x)>1,TRUE,FALSE)) # only if there's at least 2 words
+        tokenizedText <- lapply(tokenizedText[bigramIndex],function(x) { paste(x[1:(length(x)-1)],x[2:length(x)]) })
+    }
+    if(numGram == 3) { # Trigrams
+        trigramIndex <- sapply(tokenizedText, function(x) ifelse(length(x)>2,TRUE,FALSE)) # if there's at least 3 words
+        tokenizedText <- lapply(tokenizedText[trigramIndex],function(x) { paste(x[1:(length(x)-2)],x[2:(length(x)-1)],x[3:length(x)]) })
+    }
+    
+    #
+    # Count unique n-grams
+    #
+    
+    # simulates term-document-matrix
+    if(useMatrix == TRUE) {
+        numberOfTokens <- length(tokenizedText)
+        uniqueNgrams <- unique(unlist(tokenizedText))
+        ngramMatrix <- matrix(0,length(uniqueNgrams),numberOfTokens)
+        rownames(ngramMatrix) <- uniqueNgrams
+        colnames(ngramMatrix) <- 1:numberOfTokens
+        for(i in 1:numberOfTokens) {
+            tokenTable <- table(tokenizedText[[i]])
+            ngramMatrix[names(tokenTable),i] <- tokenTable
+        }
+    }
+    else {
+        # just get counts if not using matrix
+        ngramMatrix <- sort(table(unlist(tokenizedText)),decreasing = TRUE)
+    }
+    ngramMatrix
+}
+
+
+
+```
+
+``` {r work, echo=FALSE}
+blogFilePath <- "./final/en_US/en_US.blogs.txt"
+twitterFilePath <- "./final/en_US/en_US.twitter.txt"
+newsFilePath <- "./final/en_US/en_US.news.txt"
+
+# Just grab the first 1000 lines because we want to keep this quick
+numLines <- 2000
+blogFile <- readLines(blogFilePath, numLines)
+twitterFile <- readLines(twitterFilePath, numLines)
+newsFile <- readLines(newsFilePath, numLines)
+
+
+```
+
+``` {r counts, echo=FALSE}
+
+fileCountsPath <- "./fileCounts.txt"
+
+# get the line and word counts, as well as file sizes. Use wc system command
+blogCounts <- system("wc -lwc ./final/en_US/en_US.blogs.txt", intern = TRUE)
+twitterCounts <- system("wc -lwc ./final/en_US/en_US.twitter.txt", intern = TRUE)
+newsCounts <- system("wc -lwc ./final/en_US/en_US.news.txt", intern = TRUE)
+
+# each of these counts has the format of: blank, line count, word count, file size, file name
+blogCounts <- strsplit(blogCounts, " +") %>% unlist()
+twitterCounts <- strsplit(twitterCounts, " +") %>% unlist()
+newsCounts <- strsplit(newsCounts, " +") %>% unlist()
+
+# put these counts into a table
+lineCounts <- c(prettyNum(as.numeric(blogCounts[2]), big.mark = ","), prettyNum(as.numeric(twitterCounts[2]), big.mark = ","), prettyNum(as.numeric(newsCounts[2]), big.mark = ","), prettyNum(as.numeric(blogCounts[2])+as.numeric(twitterCounts[2])+as.numeric(newsCounts[2]), big.mark = ","))
+wordCounts <- c(prettyNum(as.numeric(blogCounts[3]), big.mark = ","), prettyNum(as.numeric(twitterCounts[3]), big.mark = ","), prettyNum(as.numeric(newsCounts[3]), big.mark = ","), prettyNum(as.numeric(blogCounts[3])+as.numeric(twitterCounts[3])+as.numeric(newsCounts[3]), big.mark = ","))
+fileSizes <- c(formatC(as.numeric(blogCounts[4])/(1024*1024), digits = 1, format = "f"), formatC(as.numeric(twitterCounts[4])/(1024*1024), digits = 1, format = "f"), formatC(as.numeric(newsCounts[4])/(1024*1024), digits = 1, format = "f"), formatC((as.numeric(blogCounts[4])+as.numeric(twitterCounts[4])+as.numeric(newsCounts[4]))/(1024*1024), digits = 1, format = "f"))
+```
+
+``` {r corpus, echo=FALSE}
+# get a sample of the data
+index <- sample(seq(numLines))
+corpus <- c(blogFile[index[1:numLines]], twitterFile[index[1:numLines]], newsFile[index[1:numLines]])
+
+# create unigram matrix
+unigrams <- generateNgrams(corpus, numGram = 1, useMatrix=TRUE)
+unigramMatrix <- unigrams %*% matrix(1,(numLines*3),1)
+names(unigramMatrix) <- rownames(unigrams)
+unigramMatrix <- sort(unigramMatrix, decreasing = TRUE)
+
+# now we'll create the dictionary from the unigrams
+dictionary <- names(unigramMatrix)
+
+# create bigram matrix
+bigrams <- generateNgrams(corpus, numGram = 2, useMatrix = TRUE, dictionary)
+bigramMatrix <- bigrams %*% matrix(1, ncol(bigrams), 1)
+names(bigramMatrix) <- rownames(bigrams)
+bigramMatrix <- sort(bigramMatrix, decreasing = TRUE)
+
+# create trigram matrix
+trigrams <- generateNgrams(corpus, numGram = 3, useMatrix = TRUE, dictionary)
+trigramMatrix <- trigrams %*% matrix(1, ncol(trigrams), 1)
+names(trigramMatrix) <- rownames(trigrams)
+trigramMatrix <- sort(trigramMatrix, decreasing = TRUE)
+
+blogFile <- file(blogFilePath, "rb")
+twitterFile <- file(twitterFilePath, "rb")
+newsFile <- file(newsFilePath, "rb")
+```
+
+## Data Statistics
+
+The following table lists out the line and word counts for each data source. These data sources are the training set for the predictive text model that will be developed for later milestones. The final line contains the totals for each column.
+
+| File | No. of Lines | No. of Words | File Size (MB)
+| --- | --- | --- | -- |
+| en_US.blogs.txt | `r lineCounts[1]` | `r wordCounts[1]` | `r fileSizes[1]` |
+| en_US.twitter.txt | `r lineCounts[2]` | `r wordCounts[2]` | `r fileSizes[2]` |
+| en_US.news.txt | `r lineCounts[3]` | `r wordCounts[3]` | `r fileSizes[3]` |
+|  | `r lineCounts[4]` | `r wordCounts[4]` | `r fileSizes[4]` |
+
+The following bar graphs show the most common words found between the three sources combined. This is a truncated set as a sample of 2000 lines were read from each of the source files for a quick review. 
+
+``` {r unigramBarGraph, echo=FALSE}
+# look at the top 10 unigrams
+words <- names(unigramMatrix[1:10])
+counts <- unname(unigramMatrix[1:10])
+unigramDataFrame <- data.frame(words, counts)
+unigramDataFrame <- unigramDataFrame[order(unigramDataFrame$counts, decreasing = TRUE), ]
+unigramDataFrame$words <- factor(unigramDataFrame$words, levels = unigramDataFrame$words)
+ggplot(data = unigramDataFrame, aes(x=words, y=counts)) + geom_bar(stat = "identity", fill="cadetblue") + labs(title = "Top 10 Unigrams")
+```
+
+``` {r bigramBarGraph, echo=FALSE}
+# top 10 bigrams
+words <- names(bigramMatrix[1:10])
+counts <- unname(bigramMatrix[1:10])
+bigramDataFrame <- data.frame(words, counts)
+bigramDataFrame <- bigramDataFrame[order(bigramDataFrame$counts, decreasing = TRUE), ]
+bigramDataFrame$words <- factor(bigramDataFrame$words, levels = bigramDataFrame$words)
+ggplot(data = bigramDataFrame, aes(x=words, y=counts)) + geom_bar(stat = "identity", fill="coral") + theme(axis.text.x = element_text(angle = 65, vjust = 0.6)) + labs(title = "Top 10 Bigrams")
+```
+
+``` {r trigramBarGraph, echo=FALSE}
+# top 10 trigrams
+words <- names(trigramMatrix[1:10])
+counts <- unname(trigramMatrix[1:10])
+trigramDataFrame <- data.frame(words, counts)
+trigramDataFrame <- trigramDataFrame[order(trigramDataFrame$counts, decreasing = TRUE), ]
+trigramDataFrame$words <- factor(trigramDataFrame$words, levels = trigramDataFrame$words)
+ggplot(data = trigramDataFrame, aes(x=words, y=counts)) + geom_bar(stat = "identity", fill="orange") + theme(axis.text.x = element_text(angle = 65, vjust = 0.6)) + labs(title = "Top 10 Trigrams")
+
+```
